@@ -1,0 +1,109 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r data cleaner}
+library(tidyverse)
+library(stringr)
+raw <- read.csv("C:/Users/enicpon/OneDrive - Newfields/Documents/camdenton_reference.csv")
+raw <- raw %>%
+  mutate(CATEGORY = gsub("O", "Operational", CATEGORY)) %>%
+  mutate(CATEGORY = gsub("E", "Environmental", CATEGORY)) %>%
+  mutate(CATEGORY = gsub("OE", "Operational_Environmental", CATEGORY)) %>%
+  mutate(DOC_NAME = gsub("MODINE000017477.pdf", "MODINE00017477.pdf", DOC_NAME)) %>%
+  mutate(MEDIA = gsub("S", "Soil", MEDIA))%>%
+  mutate(MEDIA = gsub("GW", "Groundwater", MEDIA))%>%
+  mutate(MEDIA = gsub("A", "Air", MEDIA))%>%
+  mutate(MEDIA = gsub("SW", "Surface Water", MEDIA))%>%
+  mutate(MEDIA = gsub("IN/EF", "Influent, Effluent, Sludge, Rinstate, etc.", MEDIA))%>%
+  mutate(MEDIA = gsub("NA", "Not Applicable", MEDIA))%>%
+  mutate(COMM = gsub("AGE", "Agency related communications", COMM))%>%
+  mutate(COMM = gsub("GEN", "Genereal, internal, and all non-agency related communications", COMM))%>%
+  mutate(DATA = gsub("Y", "Data", DATA)) %>%
+  mutate(DATA = gsub("N", "Not Data", DATA)) %>%
+  mutate(SOURCE_TYPE = gsub("1", "Source Type: Stand Alone Document", SOURCE_TYPE)) %>%
+  mutate(SOURCE_TYPE = gsub("2", "Source Type: Embedded with other documents", SOURCE_TYPE)) %>%
+  mutate(id = 1:n()) %>%
+  mutate(DOC_DATE = ï..DOC_DATE)
+  colnames(raw)
+```
+
+```{r search OCRd folder}
+OCRd_file_matches <- data.frame("Full_File_Pathway" = list.files("P:/NF_Atlanta/Camdenton_Batch_Upload_Files", pattern = NULL, full.names = TRUE, recursive = TRUE))
+OCRd_file_matches <- OCRd_file_matches %>%
+  transmute(Full_File_Pathway = Full_File_Pathway, 
+            DOC_NAME = substr(OCRd_file_matches$Full_File_Pathway, (sapply(gregexpr("/", OCRd_file_matches$Full_File_Pathway), tail, 1)+1), nchar(OCRd_file_matches$Full_File_Pathway))) %>%
+  distinct(DOC_NAME, .keep_all = TRUE)
+
+```
+
+```{r OCRd declaration}
+OCRd <- raw %>%
+  inner_join(OCRd_file_matches) %>%
+  transmute(id = id,
+            title = BRIEF.SUMMARY.TEXT,
+            DOC_NAME = DOC_NAME,
+            Document_Location = Full_File_Pathway,
+            Topic = paste(CATEGORY, SUB_CATEGORY, sep = ", "),
+            Type = paste(LOCATION, MEDIA, DATA, sep = ", "), 
+            Date = DOC_DATE,
+            Bates_Start = BATES_START,
+            Bates_End = BATES_END,
+            Notes = paste(SUMMARY, COMMENTS, SOURCE_TYPE, REVIEWER, sep = ", "), 
+            is_OCRd = TRUE) 
+```
+
+```{r search not OCRd p1}
+not_OCRd_file_matches <- data.frame("Full_File_Pathway" = list.files("P:/Camdenton/Documents", pattern = NULL, full.names = TRUE, recursive = TRUE))
+```
+
+```{r search not OCRd p2}
+not_OCRd_file_matches <- not_OCRd_file_matches %>%
+  transmute(Full_File_Pathway = Full_File_Pathway, 
+            DOC_NAME = substr(not_OCRd_file_matches$Full_File_Pathway, (sapply(gregexpr("/", not_OCRd_file_matches$Full_File_Pathway), tail, 1)+1), nchar(not_OCRd_file_matches$Full_File_Pathway))) %>%
+  distinct(DOC_NAME, .keep_all = TRUE)
+```
+
+```{r}
+not_OCRd <- raw %>%
+  full_join(OCRd_file_matches) %>%
+  transmute(id = id,
+            title = BRIEF.SUMMARY.TEXT,    
+            DOC_NAME = DOC_NAME,
+            Document_Location = Full_File_Pathway,
+            Topic = paste(CATEGORY, SUB_CATEGORY, sep = ", "),
+            Type = paste(LOCATION, MEDIA, DATA, sep = ", "),
+            Date = DOC_DATE,
+            Bates_Start = BATES_START,
+            Bates_End = BATES_END,
+            Notes = paste(SUMMARY, COMMENTS, SOURCE_TYPE, REVIEWER, sep = ", "),
+            is_OCRd = FALSE) %>%
+  # filter(Notes != ", , NA, " & Type != ", , " & Topic != ", ") %>%
+  filter(is.na(Document_Location) | Document_Location == "") %>%
+  full_join(not_OCRd_file_matches) %>%
+  filter(!is.na(id)) %>%
+  mutate(Document_Location = Full_File_Pathway) %>%
+  select(-Full_File_Pathway)
+```
+
+```{r}
+addToAcrobat <- not_OCRd %>%
+  filter(!is.na(Document_Location))
+```
+
+```{r}
+final <- rbind(OCRd, not_OCRd) %>%
+  mutate(Notes = paste("[Key--  Topic: Category, Subcategory;  Type: Location, Media, isData;  Notes: Key, Summary, Comments, Source Type, Reviewer Initials]\n", Notes)) %>%
+  arrange(id) %>%
+  distinct(id, .keep_all = TRUE)
+```
+
+```{r}
+write.csv(final,"C:/Users/enicpon/OneDrive - Newfields/Final_Camdenton_Uploadv04.csv", row.names = FALSE)
+write.csv(not_OCRd, "C:/Users/enicpon/OneDrive - Newfields/camdenton_not_found.csv", row.names = FALSE)
+```
